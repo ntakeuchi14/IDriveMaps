@@ -161,13 +161,14 @@ public class MapsControlService extends AccessibilityService {
             return;
         }
         AppLog.add("iDrive " + name(code));
+        updateArea();
         switch (code) {
-            case 1: swipe(500, 200, 500, 300); break;   // 上
-            case 2: swipe(500, 200, 500, 100); break;   // 下
-            case 3: swipe(500, 200, 600, 200); break;   // 右
-            case 4: swipe(500, 200, 400, 200); break;   // 左
-            case 5: push(); break;                      // 押し込み
-            case 6: zoomOut(); break;                   // 左回し
+            case 1: swipe(0, 100); break;     // 上   (Tasker: 500,200→500,300)
+            case 2: swipe(0, -100); break;    // 下   (Tasker: 500,200→500,100)
+            case 3: swipe(100, 0); break;     // 右   (Tasker: 500,200→600,200)
+            case 4: swipe(-100, 0); break;    // 左   (Tasker: 500,200→400,200)
+            case 5: push(); break;            // 押し込み
+            case 6: zoomOut(); break;         // 左回し
             case 7: zoomIn(); break;                    // 右回し
         }
     }
@@ -205,57 +206,83 @@ public class MapsControlService extends AccessibilityService {
 
     private static CharSequence nz(CharSequence s) { return s == null ? "" : s; }
 
-    // ---- 座標変換 (1280x480 基準 → 実画面)
+    // ---- 操作位置: Google マップのウィンドウの中心を基準にする (分割画面対応)
 
-    private float sx = 1f, sy = 1f;
+    private final Rect area = new Rect();   // マップのウィンドウ範囲 (画面座標)
+    private float sx = 1f, sy = 1f;         // 1280x480 基準の距離 → 実画面の倍率
 
-    private void updateScale() {
-        if (!Config.scale(this)) { sx = sy = 1f; return; }
+    private void updateArea() {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         Point size = new Point();
         wm.getDefaultDisplay().getRealSize(size);
-        sx = size.x / (float) Config.BASE_W;
-        sy = size.y / (float) Config.BASE_H;
+        if (Config.scale(this)) {
+            sx = size.x / (float) Config.BASE_W;
+            sy = size.y / (float) Config.BASE_H;
+        } else {
+            sx = sy = 1f;
+        }
+        area.set(0, 0, size.x, size.y);
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null && Config.MAPS_PKG.contentEquals(nz(r.getPackageName()))) {
+                    Rect b = new Rect();
+                    w.getBoundsInScreen(b);
+                    if (b.width() > 0 && b.height() > 0) area.set(b);
+                    break;
+                }
+            }
+        } catch (Exception ignored) { }
+        if (Config.debug(this)) AppLog.add("  マップ範囲 " + area.toShortString());
     }
 
-    private float X(float x) { return x * sx; }
-    private float Y(float y) { return y * sy; }
+    private float cx() { return area.exactCenterX(); }
+    private float cy() { return area.exactCenterY(); }
+
+    /** 距離をマップの範囲内に収める (分割画面で狭いとき用) */
+    private float dx(float base) {
+        float d = base * sx, max = area.width() * 0.4f;
+        return Math.max(-max, Math.min(max, d));
+    }
+    private float dy(float base) {
+        float d = base * sy, max = area.height() * 0.4f;
+        return Math.max(-max, Math.min(max, d));
+    }
 
     // ---- ジェスチャー
 
-    private void swipe(float x1, float y1, float x2, float y2) {
-        updateScale();
+    private void swipe(float bx, float by) {
         Path p = new Path();
-        p.moveTo(X(x1), Y(y1));
-        p.lineTo(X(x2), Y(y2));
+        p.moveTo(cx(), cy());
+        p.lineTo(cx() + dx(bx), cy() + dy(by));
         enqueue(new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(p, 0, 220))
                 .build());
     }
 
-    /** Zoom In Tap: (600,240) をダブルタップ */
+    /** Zoom In Tap: マップ中央をダブルタップ */
     private void zoomIn() {
-        updateScale();
         GestureDescription.Builder b = new GestureDescription.Builder();
-        b.addStroke(new GestureDescription.StrokeDescription(point(600, 240), 0, 30));
-        b.addStroke(new GestureDescription.StrokeDescription(point(600, 240), 110, 30));
+        b.addStroke(new GestureDescription.StrokeDescription(point(cx(), cy()), 0, 30));
+        b.addStroke(new GestureDescription.StrokeDescription(point(cx(), cy()), 110, 30));
         enqueue(b.build());
     }
 
-    /** Zoom Out Tap: (640,240) を中心に間隔200の2本指タップ ×2 */
+    /** Zoom Out Tap: マップ中央を挟んで2本指タップ ×2 */
     private void zoomOut() {
-        updateScale();
+        float d = dx(100);
         for (int i = 0; i < 2; i++) {
             GestureDescription.Builder b = new GestureDescription.Builder();
-            b.addStroke(new GestureDescription.StrokeDescription(point(540, 240), 0, 50));
-            b.addStroke(new GestureDescription.StrokeDescription(point(740, 240), 0, 50));
+            b.addStroke(new GestureDescription.StrokeDescription(point(cx() - d, cy()), 0, 50));
+            b.addStroke(new GestureDescription.StrokeDescription(point(cx() + d, cy()), 0, 50));
             enqueue(b.build());
         }
     }
 
-    private Path point(float x, float y) {
+    private static Path point(float x, float y) {
         Path p = new Path();
-        p.moveTo(X(x), Y(y));
+        p.moveTo(x, y);
         return p;
     }
 
