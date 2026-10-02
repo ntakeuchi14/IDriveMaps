@@ -54,6 +54,8 @@ public class MainActivity extends Activity {
         text("② ログ読み取り権限（PCから1回だけ実行）:\nadb shell pm grant " + getPackageName()
                 + " android.permission.READ_LOGS", 13).setTextIsSelectable(true);
         button("②' root化済みならここで権限付与", v -> grantByRoot());
+        text("③ 再起動後にユーザー補助を自動でONにし直す（任意・PCから1回だけ）:\nadb shell pm grant " + getPackageName()
+                + " android.permission.WRITE_SECURE_SETTINGS", 13).setTextIsSelectable(true);
 
         header("設定");
         enabledCb = check("有効にする", Config.enabled(this));
@@ -86,7 +88,11 @@ public class MainActivity extends Activity {
         logView.setTextIsSelectable(true);
     }
 
-    @Override protected void onResume() { super.onResume(); h.post(refresher); }
+    @Override protected void onResume() {
+        super.onResume();
+        AccessibilityKeeper.ensureEnabled(this);
+        h.post(refresher);
+    }
     @Override protected void onPause() { super.onPause(); h.removeCallbacks(refresher); }
 
     private void refresh() {
@@ -96,6 +102,7 @@ public class MainActivity extends Activity {
         statusView.setText(
                 "ユーザー補助サービス: " + (svc ? "✅ 動作中" : "❌ OFF（①でONにしてください）") + "\n"
               + "READ_LOGS 権限: " + (perm ? "✅ あり" : "なし → root で読み取り（rootが無い場合は②を実行）") + "\n"
+              + "自動ON（再起動時）: " + (AccessibilityKeeper.canWrite(this) ? "✅ 有効" : "— 未設定（③を実行すると有効）") + "\n"
               + "監視: " + (svc ? MapsControlService.status : "停止中"));
         logView.setText(AppLog.dump());
     }
