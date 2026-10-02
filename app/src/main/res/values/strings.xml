@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">iDrive Maps</string>
+    <string name="service_label">iDrive Maps コントロール</string>
+    <string name="service_desc">iDriveコントローラーの操作(KswMcuListenerのログ)を監視し、Googleマップ表示中にスワイプ・ズーム・タップを実行します。</string>
+</resources>
