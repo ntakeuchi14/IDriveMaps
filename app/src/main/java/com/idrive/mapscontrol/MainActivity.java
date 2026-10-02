@@ -95,7 +95,7 @@ public class MainActivity extends Activity {
                 == PackageManager.PERMISSION_GRANTED;
         statusView.setText(
                 "ユーザー補助サービス: " + (svc ? "✅ 動作中" : "❌ OFF（①でONにしてください）") + "\n"
-              + "READ_LOGS 権限: " + (perm ? "✅ あり" : (Config.useRoot(this) ? "— (root使用)" : "❌ なし（②を実行）")) + "\n"
+              + "READ_LOGS 権限: " + (perm ? "✅ あり" : "なし → root で読み取り（rootが無い場合は②を実行）") + "\n"
               + "監視: " + (svc ? MapsControlService.status : "停止中"));
         logView.setText(AppLog.dump());
     }
