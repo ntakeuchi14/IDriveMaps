@@ -46,6 +46,7 @@ public class MapsControlService extends AccessibilityService {
     private final ArrayDeque<GestureDescription> queue = new ArrayDeque<>();
     private boolean busy = false;
 
+    private volatile int gen = 0;          // 監視スレッドの世代 (再起動時に古いスレッドを止める)
     private volatile boolean running = false;
     private volatile Process logcat;
     private Thread reader;
@@ -85,29 +86,28 @@ public class MapsControlService extends AccessibilityService {
 
     private void startMonitor() {
         running = true;
-        reader = new Thread(this::monitorLoop, "logcat-reader");
+        final int my = ++gen;
+        reader = new Thread(() -> monitorLoop(my), "logcat-reader");
         reader.start();
     }
 
     private void stopMonitor() {
         running = false;
+        gen++;
         Process p = logcat;
         if (p != null) p.destroy();
         if (reader != null) reader.interrupt();
     }
 
-    private void monitorLoop() {
-        while (running) {
+    private void monitorLoop(int my) {
+        while (running && gen == my) {
             Context c = this;
             String tag = Config.tag(c).trim();
-            boolean root = Config.useRoot(c);
             boolean hasPerm = checkSelfPermission(android.Manifest.permission.READ_LOGS)
                     == PackageManager.PERMISSION_GRANTED;
-            if (!hasPerm && !root) {
-                status = "⚠ READ_LOGS 権限がありません (adbで付与するか root を使用)";
-            } else {
-                status = "監視中 (" + (root ? "root" : "READ_LOGS") + ", tag=" + tag + ")";
-            }
+            // 権限が無ければ Tasker と同様に root(su) で読む (root化済みなら初回に許可ダイアログが出る)
+            boolean root = Config.useRoot(c) || !hasPerm;
+            status = "監視中 (" + (root ? "root" : "READ_LOGS") + ", tag=" + tag + ")";
             String cmd = "logcat -v brief -T 1 -s " + tag;
             try {
                 Process p = root
@@ -116,17 +116,28 @@ public class MapsControlService extends AccessibilityService {
                 logcat = p;
                 BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
                 String line;
-                while (running && (line = br.readLine()) != null) {
+                int n = 0;
+                while (running && gen == my && (line = br.readLine()) != null) {
+                    n++;
                     handleLine(line);
                 }
                 p.destroy();
+                if (running && gen == my && n == 0) {
+                    // su が拒否された等ですぐ終了した。許可ダイアログを連発しないよう間隔を空ける
+                    status = root ? "⚠ root が拒否されたか使えません (adbで権限付与するか、root許可後に保存を押す)"
+                                  : "⚠ logcat がすぐ終了しました";
+                    AppLog.add(status);
+                    Thread.sleep(30000);
+                }
             } catch (Exception e) {
-                if (running) {
-                    status = "⚠ logcat 起動失敗: " + e.getMessage();
+                if (running && gen == my) {
+                    status = root && !hasPerm
+                            ? "⚠ READ_LOGS 権限が無く、root も使えません (adbで権限付与が必要)"
+                            : "⚠ logcat 起動失敗: " + e.getMessage();
                     AppLog.add(status);
                 }
             }
-            if (running) {
+            if (running && gen == my) {
                 try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
             }
         }
